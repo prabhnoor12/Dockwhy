@@ -1,0 +1,41 @@
+version: 2
+
+project_name: dockwhy
+
+builds:
+  - id: dockwhy
+    main: ./cmd/dockwhy
+    binary: dockwhy
+    ldflags:
+      - -s -w -X github.com/dockwhy/dockwhy/internal/version.Version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  name_template: "{{ incpatch .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"

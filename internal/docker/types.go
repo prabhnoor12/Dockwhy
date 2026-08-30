@@ -10,6 +10,15 @@ type Container struct {
 	Name            string            `json:"name"`
 	Image           string            `json:"image"`
 	Created         string            `json:"created"`
+	Entrypoint      []string          `json:"entrypoint,omitempty"`
+	Command         []string          `json:"command,omitempty"`
+	WorkingDir      string            `json:"working_dir,omitempty"`
+	User            string            `json:"user,omitempty"`
+	StopSignal      string            `json:"stop_signal,omitempty"`
+	LogDriver       string            `json:"log_driver,omitempty"`
+	Mounts          []Mount           `json:"mounts,omitempty"`
+	ComposeProject  string            `json:"compose_project,omitempty"`
+	ComposeService  string            `json:"compose_service,omitempty"`
 	State           State             `json:"state"`
 	RestartCount    int               `json:"restart_count"`
 	RestartPolicy   string            `json:"restart_policy"`
@@ -25,6 +34,28 @@ type Container struct {
 	SizeRW          int64             `json:"writable_layer_bytes"`
 	SizeRootFS      int64             `json:"root_filesystem_bytes"`
 	Labels          map[string]string `json:"labels,omitempty"`
+}
+
+type Stats struct {
+	CPUPercent       float64 `json:"cpu_percent"`
+	MemoryUsageBytes int64   `json:"memory_usage_bytes"`
+	MemoryLimitBytes int64   `json:"memory_limit_bytes"`
+	MemoryPercent    float64 `json:"memory_percent"`
+	NetworkRxBytes   int64   `json:"network_rx_bytes"`
+	NetworkTxBytes   int64   `json:"network_tx_bytes"`
+	BlockReadBytes   int64   `json:"block_read_bytes"`
+	BlockWriteBytes  int64   `json:"block_write_bytes"`
+	PidsCurrent      int64   `json:"pids_current"`
+}
+
+type Mount struct {
+	Type        string `json:"type"`
+	Name        string `json:"name,omitempty"`
+	Source      string `json:"source,omitempty"`
+	Destination string `json:"destination"`
+	Mode        string `json:"mode,omitempty"`
+	RW          bool   `json:"rw"`
+	Propagation string `json:"propagation,omitempty"`
 }
 
 type State struct {
@@ -69,4 +100,5 @@ type Client interface {
 	Inspect(name string) (Container, error)
 	Logs(name string, tail int) (LogOutput, error)
 	Events(containerID string, since time.Duration) ([]Event, error)
+	Stats(name string) (Stats, error)
 }

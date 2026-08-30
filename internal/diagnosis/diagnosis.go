@@ -2,6 +2,7 @@ package diagnosis
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/dockwhy/dockwhy/internal/docker"
@@ -9,6 +10,9 @@ import (
 
 type Result struct {
 	Container     docker.Container `json:"container"`
+	Findings      []Finding        `json:"findings"`
+	Stats         *docker.Stats    `json:"stats,omitempty"`
+	StatsError    string           `json:"stats_error,omitempty"`
 	Reason        string           `json:"reason"`
 	Summary       string           `json:"summary"`
 	Severity      string           `json:"severity"`
@@ -16,10 +20,24 @@ type Result struct {
 	Evidence      []Evidence       `json:"evidence"`
 	Advice        []string         `json:"advice"`
 	Logs          string           `json:"recent_logs"`
+	LogsSkipped   bool             `json:"logs_skipped,omitempty"`
 	LogsTruncated bool             `json:"logs_truncated,omitempty"`
 	LogError      string           `json:"log_error,omitempty"`
 	Events        []docker.Event   `json:"events,omitempty"`
 	EventsError   string           `json:"events_error,omitempty"`
+}
+
+// Finding is one explanation supported by a distinct set of evidence. The
+// first finding is the primary diagnosis; later findings are secondary
+// signals that may also help explain the container's state.
+type Finding struct {
+	Rank       int        `json:"rank"`
+	Reason     string     `json:"reason"`
+	Summary    string     `json:"summary"`
+	Severity   string     `json:"severity"`
+	Confidence string     `json:"confidence"`
+	Evidence   []Evidence `json:"evidence,omitempty"`
+	Advice     []string   `json:"advice,omitempty"`
 }
 
 type Evidence struct {
@@ -36,8 +54,12 @@ func Analyze(c docker.Container, logs string, logErr error) Result {
 // codes are treated as facts; text-based signals are either secondary or
 // marked with lower confidence.
 func AnalyzeDetailed(c docker.Container, logs string, logsTruncated bool, events []docker.Event, logErr, eventsErr error) Result {
+	orderedEvents := append([]docker.Event(nil), events...)
+	sort.SliceStable(orderedEvents, func(i, j int) bool {
+		return orderedEvents[i].TimeNano < orderedEvents[j].TimeNano
+	})
 	r := Result{
-		Container: c, Logs: logs, LogsTruncated: logsTruncated, Events: events,
+		Container: c, Logs: logs, LogsTruncated: logsTruncated, Events: orderedEvents,
 		Severity: "info", Confidence: "high",
 	}
 	if logErr != nil {
@@ -45,6 +67,28 @@ func AnalyzeDetailed(c docker.Container, logs string, logsTruncated bool, events
 	}
 	if eventsErr != nil {
 		r.EventsError = eventsErr.Error()
+	}
+
+	type candidate struct {
+		finding Finding
+		score   int
+		order   int
+	}
+	candidates := make([]candidate, 0, 4)
+	order := 0
+	addFinding := func(score int, reason, summary, severity, confidence string, evidence []Evidence, advice ...string) {
+		order++
+		candidates = append(candidates, candidate{
+			finding: Finding{
+				Reason: reason, Summary: summary, Severity: severity,
+				Confidence: confidence, Evidence: evidence, Advice: advice,
+			},
+			score: score,
+			order: order,
+		})
+	}
+	fact := func(name, value string) Evidence {
+		return Evidence{Name: name, Value: value}
 	}
 
 	add := func(name, value string) {
@@ -71,55 +115,112 @@ func AnalyzeDetailed(c docker.Container, logs string, logsTruncated bool, events
 			add("latest health check", fmt.Sprintf("exit %d: %s", latest.ExitCode, strings.TrimSpace(latest.Output)))
 		}
 	}
+	if len(c.Entrypoint) > 0 {
+		add("entrypoint", formatCommand(c.Entrypoint))
+	}
+	if len(c.Command) > 0 {
+		add("command", formatCommand(c.Command))
+	}
+	if c.WorkingDir != "" {
+		add("working directory", c.WorkingDir)
+	}
+	if c.User != "" {
+		add("user", c.User)
+	}
+	if c.StopSignal != "" {
+		add("stop signal", c.StopSignal)
+	}
+	if c.LogDriver != "" {
+		add("logging driver", c.LogDriver)
+	}
+	if c.ComposeProject != "" {
+		add("Compose project", c.ComposeProject)
+	}
+	if c.ComposeService != "" {
+		add("Compose service", c.ComposeService)
+	}
+	for _, mount := range c.Mounts {
+		if mount.Destination == "" {
+			continue
+		}
+		mode := "ro"
+		if mount.RW {
+			mode = "rw"
+		}
+		source := mount.Source
+		if source == "" {
+			source = mount.Name
+		}
+		if source == "" {
+			source = mount.Type
+		}
+		add("mount", fmt.Sprintf("%s -> %s (%s)", source, mount.Destination, mode))
+	}
 
 	switch {
 	case c.State.OOMKilled:
-		r.Severity, r.Reason, r.Summary, r.Confidence = "critical", "out of memory", "Docker killed the container after it exceeded its memory limit.", "high"
-		r.Advice = append(r.Advice, "Reduce the application's memory use or raise the container memory limit.")
+		addFinding(100, "out of memory", "Docker killed the container after it exceeded its memory limit.", "critical", "high",
+			[]Evidence{fact("OOM killed", "true"), fact("exit code", fmt.Sprint(c.State.ExitCode))},
+			"Reduce the application's memory use or raise the container memory limit.")
 	case c.State.ExitCode == 137:
-		r.Severity, r.Reason, r.Summary, r.Confidence = "critical", "forcefully killed (exit 137)", "The process received SIGKILL; this is commonly an out-of-memory kill, although an external kill can produce the same code.", "medium"
-		r.Advice = append(r.Advice, "Check OOMKilled above and container/host events; reduce memory use or increase the limit if it was an OOM kill.")
+		addFinding(95, "forcefully killed (exit 137)", "The process received SIGKILL; this is commonly an out-of-memory kill, although an external kill can produce the same code.", "critical", "medium",
+			[]Evidence{fact("exit code", "137"), fact("OOM killed", fmt.Sprint(c.State.OOMKilled))},
+			"Check OOMKilled above and container/host events; reduce memory use or increase the limit if it was an OOM kill.")
 	case c.State.ExitCode == 143:
-		r.Reason, r.Summary, r.Confidence = "gracefully stopped (exit 143)", "The process received SIGTERM, usually from docker stop, a deployment, or an orchestrator.", "medium"
-		r.Advice = append(r.Advice, "Check deployment and orchestrator events around the finished time.")
+		addFinding(85, "gracefully stopped (exit 143)", "The process received SIGTERM, usually from docker stop, a deployment, or an orchestrator.", "info", "medium",
+			[]Evidence{fact("exit code", "143")},
+			"Check deployment and orchestrator events around the finished time.")
 	case c.State.ExitCode == 126:
-		r.Reason, r.Summary, r.Confidence = "command not executable (exit 126)", "The configured entrypoint or command was found but could not be executed.", "high"
-		r.Advice = append(r.Advice, "Check executable permissions, the image architecture, and the container user.")
+		addFinding(90, "command not executable (exit 126)", "The configured entrypoint or command was found but could not be executed.", "error", "high",
+			[]Evidence{fact("exit code", "126")},
+			"Check executable permissions, the image architecture, and the container user.")
 	case c.State.ExitCode == 127:
-		r.Reason, r.Summary, r.Confidence = "command not found (exit 127)", "The configured entrypoint or command was not available in the image.", "high"
-		r.Advice = append(r.Advice, "Verify the image entrypoint and command, including PATH and copied file names.")
+		addFinding(90, "command not found (exit 127)", "The configured entrypoint or command was not available in the image.", "error", "high",
+			[]Evidence{fact("exit code", "127")},
+			"Verify the image entrypoint and command, including PATH and copied file names.")
 	case c.State.ExitCode == 139:
-		r.Severity, r.Reason, r.Summary, r.Confidence = "error", "segmentation fault (exit 139)", "The main process crashed with SIGSEGV.", "high"
-		r.Advice = append(r.Advice, "Inspect the application logs and crash-dump tooling for the failing process.")
+		addFinding(90, "segmentation fault (exit 139)", "The main process crashed with SIGSEGV.", "error", "high",
+			[]Evidence{fact("exit code", "139")},
+			"Inspect the application logs and crash-dump tooling for the failing process.")
 	case c.State.Error != "":
-		r.Severity, r.Reason, r.Summary = "error", "Docker runtime error", "Docker reported an error while creating or running the container."
-		r.Advice = append(r.Advice, "Use the Docker error and recent logs to correct the runtime or mount configuration.")
+		addFinding(80, "Docker runtime error", "Docker reported an error while creating or running the container.", "error", "high",
+			[]Evidence{fact("Docker error", c.State.Error)},
+			"Use the Docker error and recent logs to correct the runtime or mount configuration.")
 	case c.State.Restarting || c.State.Status == "restarting":
-		r.Severity, r.Reason, r.Summary = "warning", "restart loop", "Docker is repeatedly restarting the container; the exit code above is the latest observed failure."
-		r.Advice = append(r.Advice, "Inspect the earliest failed restart and consider temporarily disabling the restart policy while debugging.")
+		addFinding(75, "restart loop", "Docker is repeatedly restarting the container; the exit code above is the latest observed failure.", "warning", "high",
+			[]Evidence{fact("status", c.State.Status), fact("restart count", fmt.Sprint(c.RestartCount))},
+			"Inspect the earliest failed restart and consider temporarily disabling the restart policy while debugging.")
 	case c.State.Running:
-		r.Reason, r.Summary = "container is running", "The container has not stopped; the details describe its current state and latest health signals."
-		r.Advice = append(r.Advice, "If this is unexpected, inspect health checks and restart events rather than treating it as a crash.")
+		addFinding(40, "container is running", "The container has not stopped; the details describe its current state and latest health signals.", "info", "high",
+			[]Evidence{fact("running", "true")},
+			"If this is unexpected, inspect health checks and restart events rather than treating it as a crash.")
 	case c.State.Paused:
-		r.Reason, r.Summary = "container is paused", "Docker has paused the container; its main process has not necessarily crashed."
-		r.Advice = append(r.Advice, "Resume it with docker unpause if the pause was not intentional.")
+		addFinding(60, "container is paused", "Docker has paused the container; its main process has not necessarily crashed.", "warning", "high",
+			[]Evidence{fact("paused", "true")},
+			"Resume it with docker unpause if the pause was not intentional.")
 	case c.State.Status == "created":
-		r.Reason, r.Summary = "container has not started", "The container was created but its main process has not run yet."
-		r.Advice = append(r.Advice, "Check the image entrypoint, mounts, and the command used to start it.")
+		addFinding(60, "container has not started", "The container was created but its main process has not run yet.", "info", "high",
+			[]Evidence{fact("status", "created")},
+			"Check the image entrypoint, mounts, and the command used to start it.")
 	case c.State.ExitCode == 0:
-		r.Reason, r.Summary = "clean exit", "The main process exited successfully with code 0; this was not an application crash."
-		r.Advice = append(r.Advice, "If the container should stay alive, check whether its command is a short-lived job or worker startup script.")
+		addFinding(70, "clean exit", "The main process exited successfully with code 0; this was not an application crash.", "info", "high",
+			[]Evidence{fact("exit code", "0")},
+			"If the container should stay alive, check whether its command is a short-lived job or worker startup script.")
 	default:
-		r.Reason, r.Summary, r.Confidence = "application exited", fmt.Sprintf("The main process exited with code %d.", c.State.ExitCode), "low"
-		r.Advice = append(r.Advice, "Read the recent logs for the application's own shutdown or crash message.")
+		addFinding(30, "application exited", fmt.Sprintf("The main process exited with code %d.", c.State.ExitCode), "info", "low",
+			[]Evidence{fact("exit code", fmt.Sprint(c.State.ExitCode))},
+			"Read the recent logs for the application's own shutdown or crash message.")
 	}
 
 	if c.State.Health != nil && c.State.Health.Status == "unhealthy" {
 		add("health diagnosis", "health checks are failing")
-		r.Advice = append(r.Advice, "Review the latest health-check output and confirm the endpoint, port, timeout, and startup grace period.")
-		if c.State.Running && r.Reason == "container is running" {
-			r.Severity, r.Reason, r.Summary = "warning", "unhealthy health check", "The container is running, but its health check is failing. Docker does not normally stop a container solely because it is unhealthy."
+		score := 55
+		if c.State.Running {
+			score = 95
 		}
+		addFinding(score, "unhealthy health check", "The container is running, but its health check is failing. Docker does not normally stop a container solely because it is unhealthy.", "warning", "high",
+			[]Evidence{fact("health", fmt.Sprintf("%s (failing streak: %d)", c.State.Health.Status, c.State.Health.FailingStreak))},
+			"Review the latest health-check output and confirm the endpoint, port, timeout, and startup grace period.")
 	}
 
 	if logsTruncated {
@@ -170,12 +271,65 @@ func AnalyzeDetailed(c docker.Container, logs string, logsTruncated bool, events
 	if diskSignal {
 		if c.State.OOMKilled || c.State.ExitCode == 137 {
 			add("disk signal", "no space left on device (secondary signal; OOM evidence remains primary)")
+			addFinding(20, "disk full (secondary signal)", "The logs or Docker runtime error also indicate that storage may have been exhausted.", "warning", "low",
+				[]Evidence{fact("disk signal", "no space left on device")},
+				"Check host filesystem usage, Docker's data-root, volumes, and any storage quota.")
 		} else {
-			r.Reason, r.Summary, r.Severity, r.Confidence = "disk full", "The logs or Docker runtime error indicate that the container or host ran out of disk space.", "critical", "high"
-			r.Advice = append(r.Advice, "Check host filesystem usage, Docker's data-root, volumes, and any storage quota.")
+			addFinding(100, "disk full", "The logs or Docker runtime error indicate that the container or host ran out of disk space.", "critical", "high",
+				[]Evidence{fact("disk signal", "no space left on device")},
+				"Check host filesystem usage, Docker's data-root, volumes, and any storage quota.")
+		}
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].score != candidates[j].score {
+			return candidates[i].score > candidates[j].score
+		}
+		return candidates[i].order < candidates[j].order
+	})
+	for i, candidate := range candidates {
+		candidate.finding.Rank = i + 1
+		r.Findings = append(r.Findings, candidate.finding)
+	}
+	if len(r.Findings) > 0 {
+		primary := r.Findings[0]
+		r.Severity, r.Reason, r.Summary, r.Confidence = primary.Severity, primary.Reason, primary.Summary, primary.Confidence
+		for _, finding := range r.Findings {
+			for _, advice := range finding.Advice {
+				if !containsString(r.Advice, advice) {
+					r.Advice = append(r.Advice, advice)
+				}
+			}
+		}
+	}
+	if c.RestartCount > 0 {
+		advice := fmt.Sprintf("The container has restarted %d time(s); inspect the restart loop's first failure, not just its latest state.", c.RestartCount)
+		r.Advice = append(r.Advice, advice)
+	}
+	if c.ComposeService != "" {
+		advice := fmt.Sprintf("This container belongs to Compose service %q; use `docker compose logs %s` to inspect the service logs.", c.ComposeService, c.ComposeService)
+		if !containsString(r.Advice, advice) {
+			r.Advice = append(r.Advice, advice)
 		}
 	}
 	return r
+}
+
+func containsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func formatCommand(command []string) string {
+	quoted := make([]string, 0, len(command))
+	for _, part := range command {
+		quoted = append(quoted, fmt.Sprintf("%q", part))
+	}
+	return strings.Join(quoted, " ")
 }
 
 func formatBytes(value int64) string {

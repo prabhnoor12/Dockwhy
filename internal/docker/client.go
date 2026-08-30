@@ -19,6 +19,7 @@ type CLIClient struct {
 	Timeout         time.Duration
 	MaxInspectBytes int
 	MaxLogBytes     int
+	runOverride     func(maxBytes int, args ...string) (commandOutput, error)
 }
 
 func NewCLIClient() *CLIClient {
@@ -82,6 +83,26 @@ func (c *CLIClient) Events(containerID string, since time.Duration) ([]Event, er
 	return events, nil
 }
 
+func (c *CLIClient) Stats(name string) (Stats, error) {
+	out, err := c.run(1<<20, "stats", "--no-stream", "--format", "{{json .}}", name)
+	if err != nil {
+		return Stats{}, dockerCommandError("stats", name, out, err)
+	}
+	line := strings.TrimSpace(out.stdout)
+	if line == "" {
+		return Stats{}, fmt.Errorf("decode docker stats: empty output")
+	}
+	var raw statsRecord
+	if err := json.Unmarshal([]byte(line), &raw); err != nil {
+		return Stats{}, fmt.Errorf("decode docker stats: %w", err)
+	}
+	stats, err := raw.stats()
+	if err != nil {
+		return Stats{}, fmt.Errorf("decode docker stats: %w", err)
+	}
+	return stats, nil
+}
+
 type commandOutput struct {
 	stdout    string
 	stderr    string
@@ -89,6 +110,9 @@ type commandOutput struct {
 }
 
 func (c *CLIClient) run(maxBytes int, args ...string) (commandOutput, error) {
+	if c.runOverride != nil {
+		return c.runOverride(maxBytes, args...)
+	}
 	if maxBytes <= 0 {
 		maxBytes = 1 << 20
 	}
@@ -134,6 +158,7 @@ type inspectContainer struct {
 	ID           string            `json:"Id"`
 	Name         string            `json:"Name"`
 	Created      string            `json:"Created"`
+	Mounts       []inspectMount    `json:"Mounts"`
 	RestartCount int               `json:"RestartCount"`
 	Config       inspectConfig     `json:"Config"`
 	State        inspectState      `json:"State"`
@@ -143,8 +168,13 @@ type inspectContainer struct {
 }
 
 type inspectConfig struct {
-	Image  string            `json:"Image"`
-	Labels map[string]string `json:"Labels"`
+	Image      string            `json:"Image"`
+	Labels     map[string]string `json:"Labels"`
+	Entrypoint []string          `json:"Entrypoint"`
+	Cmd        []string          `json:"Cmd"`
+	WorkingDir string            `json:"WorkingDir"`
+	User       string            `json:"User"`
+	StopSignal string            `json:"StopSignal"`
 }
 
 type inspectState struct {
@@ -179,6 +209,19 @@ type inspectHostConfig struct {
 	PidsLimit         int64             `json:"PidsLimit"`
 	ReadonlyRootfs    bool              `json:"ReadonlyRootfs"`
 	StorageOpt        map[string]string `json:"StorageOpt"`
+	LogConfig         struct {
+		Type string `json:"Type"`
+	} `json:"LogConfig"`
+}
+
+type inspectMount struct {
+	Type        string `json:"Type"`
+	Name        string `json:"Name"`
+	Source      string `json:"Source"`
+	Destination string `json:"Destination"`
+	Mode        string `json:"Mode"`
+	RW          bool   `json:"RW"`
+	Propagation string `json:"Propagation"`
 }
 
 type eventRecord struct {
@@ -188,6 +231,15 @@ type eventRecord struct {
 		ID         string            `json:"ID"`
 		Attributes map[string]string `json:"Attributes"`
 	} `json:"Actor"`
+}
+
+type statsRecord struct {
+	CPUPercent string `json:"CPUPerc"`
+	MemUsage   string `json:"MemUsage"`
+	MemPercent string `json:"MemPerc"`
+	NetIO      string `json:"NetIO"`
+	BlockIO    string `json:"BlockIO"`
+	PIDs       string `json:"PIDs"`
 }
 
 type limitedBuffer struct {
@@ -234,6 +286,11 @@ func (r inspectContainer) container() Container {
 	}
 	return Container{
 		ID: r.ID, Name: strings.TrimPrefix(r.Name, "/"), Image: r.Config.Image, Created: r.Created,
+		Entrypoint: append([]string(nil), r.Config.Entrypoint...), Command: append([]string(nil), r.Config.Cmd...),
+		WorkingDir: r.Config.WorkingDir, User: r.Config.User, StopSignal: r.Config.StopSignal,
+		LogDriver:      r.Host.LogConfig.Type,
+		ComposeProject: r.Config.Labels["com.docker.compose.project"],
+		ComposeService: r.Config.Labels["com.docker.compose.service"],
 		State: State{Status: r.State.Status, Running: r.State.Running, Paused: r.State.Paused,
 			Restarting: r.State.Restarting, OOMKilled: r.State.OOMKilled, ExitCode: r.State.ExitCode,
 			Error: r.State.Error, StartedAt: r.State.StartedAt, FinishedAt: r.State.FinishedAt, Health: health},
@@ -241,6 +298,102 @@ func (r inspectContainer) container() Container {
 		MemoryLimit: r.Host.Memory, MemorySwapLimit: r.Host.MemorySwap, MemoryReserved: r.Host.MemoryReservation,
 		NanoCPUs: r.Host.NanoCPUs, CPUQuota: r.Host.CPUQuota, CPUPeriod: r.Host.CPUPeriod, PidsLimit: r.Host.PidsLimit,
 		DiskReadOnly: r.Host.ReadonlyRootfs, DiskLimit: diskLimit, SizeRW: r.SizeRW, SizeRootFS: r.SizeRoot,
-		Labels: r.Config.Labels,
+		Mounts: normalizeMounts(r.Mounts), Labels: r.Config.Labels,
 	}
+}
+
+func (r statsRecord) stats() (Stats, error) {
+	cpu, err := parsePercent(r.CPUPercent)
+	if err != nil {
+		return Stats{}, fmt.Errorf("CPU percentage %q: %w", r.CPUPercent, err)
+	}
+	memoryUsage, memoryLimit, err := parseBytePair(r.MemUsage)
+	if err != nil {
+		return Stats{}, fmt.Errorf("memory usage %q: %w", r.MemUsage, err)
+	}
+	memoryPercent, err := parsePercent(r.MemPercent)
+	if err != nil {
+		return Stats{}, fmt.Errorf("memory percentage %q: %w", r.MemPercent, err)
+	}
+	networkRx, networkTx, err := parseBytePair(r.NetIO)
+	if err != nil {
+		return Stats{}, fmt.Errorf("network I/O %q: %w", r.NetIO, err)
+	}
+	blockRead, blockWrite, err := parseBytePair(r.BlockIO)
+	if err != nil {
+		return Stats{}, fmt.Errorf("block I/O %q: %w", r.BlockIO, err)
+	}
+	pids := int64(0)
+	if strings.TrimSpace(r.PIDs) != "" && strings.TrimSpace(r.PIDs) != "N/A" {
+		pids, err = strconv.ParseInt(strings.TrimSpace(r.PIDs), 10, 64)
+		if err != nil {
+			return Stats{}, fmt.Errorf("PIDs %q: %w", r.PIDs, err)
+		}
+	}
+	return Stats{
+		CPUPercent: cpu, MemoryUsageBytes: memoryUsage, MemoryLimitBytes: memoryLimit,
+		MemoryPercent: memoryPercent, NetworkRxBytes: networkRx, NetworkTxBytes: networkTx,
+		BlockReadBytes: blockRead, BlockWriteBytes: blockWrite, PidsCurrent: pids,
+	}, nil
+}
+
+func parsePercent(value string) (float64, error) {
+	value = strings.TrimSpace(strings.TrimSuffix(value, "%"))
+	return strconv.ParseFloat(value, 64)
+}
+
+func parseBytePair(value string) (int64, int64, error) {
+	parts := strings.SplitN(value, " / ", 2)
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("expected two byte values")
+	}
+	first, err := parseBytes(parts[0])
+	if err != nil {
+		return 0, 0, err
+	}
+	second, err := parseBytes(parts[1])
+	if err != nil {
+		return 0, 0, err
+	}
+	return first, second, nil
+}
+
+func parseBytes(value string) (int64, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, fmt.Errorf("empty byte value")
+	}
+	units := []struct {
+		suffix string
+		factor float64
+	}{
+		{"KiB", 1 << 10}, {"MiB", 1 << 20}, {"GiB", 1 << 30}, {"TiB", 1 << 40},
+		{"kB", 1e3}, {"MB", 1e6}, {"GB", 1e9}, {"TB", 1e12}, {"B", 1},
+	}
+	for _, unit := range units {
+		if strings.HasSuffix(value, unit.suffix) {
+			number := strings.TrimSpace(strings.TrimSuffix(value, unit.suffix))
+			parsed, err := strconv.ParseFloat(number, 64)
+			if err != nil {
+				return 0, err
+			}
+			return int64(parsed * unit.factor), nil
+		}
+	}
+	return 0, fmt.Errorf("unknown byte unit")
+}
+
+func normalizeMounts(raw []inspectMount) []Mount {
+	if len(raw) == 0 {
+		return nil
+	}
+	mounts := make([]Mount, 0, len(raw))
+	for _, mount := range raw {
+		mounts = append(mounts, Mount{
+			Type: mount.Type, Name: mount.Name, Source: mount.Source,
+			Destination: mount.Destination, Mode: mount.Mode, RW: mount.RW,
+			Propagation: mount.Propagation,
+		})
+	}
+	return mounts
 }

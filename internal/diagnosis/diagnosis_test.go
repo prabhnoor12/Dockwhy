@@ -45,6 +45,9 @@ func TestAnalyzeOOMRemainsPrimaryWhenDiskSignalExists(t *testing.T) {
 	if len(result.Evidence) < 1 {
 		t.Fatal("expected secondary disk evidence")
 	}
+	if len(result.Findings) < 2 || result.Findings[0].Reason != "out of memory" || result.Findings[1].Reason != "disk full (secondary signal)" {
+		t.Fatalf("unexpected ranked findings: %#v", result.Findings)
+	}
 }
 
 func TestAnalyzeDiskFullFromLogs(t *testing.T) {
