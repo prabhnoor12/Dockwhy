@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dockwhy/dockwhy/internal/docker"
+	"github.com/prabhnoor12/dockwhy/internal/docker"
 )
 
 type Result struct {

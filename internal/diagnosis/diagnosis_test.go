@@ -3,7 +3,7 @@ package diagnosis
 import (
 	"testing"
 
-	"github.com/dockwhy/dockwhy/internal/docker"
+	"github.com/prabhnoor12/dockwhy/internal/docker"
 )
 
 func TestAnalyzeOOMKilled(t *testing.T) {

@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dockwhy/dockwhy/internal/diagnosis"
-	"github.com/dockwhy/dockwhy/internal/docker"
-	"github.com/dockwhy/dockwhy/internal/output"
-	"github.com/dockwhy/dockwhy/internal/version"
+	"github.com/prabhnoor12/dockwhy/internal/diagnosis"
+	"github.com/prabhnoor12/dockwhy/internal/docker"
+	"github.com/prabhnoor12/dockwhy/internal/output"
+	"github.com/prabhnoor12/dockwhy/internal/version"
 )
 
 func Run() {

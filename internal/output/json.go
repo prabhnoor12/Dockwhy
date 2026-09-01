@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/dockwhy/dockwhy/internal/diagnosis"
+	"github.com/prabhnoor12/dockwhy/internal/diagnosis"
 )
 
 func JSON(w io.Writer, result diagnosis.Result) error {

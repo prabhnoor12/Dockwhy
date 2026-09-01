@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dockwhy/dockwhy/internal/diagnosis"
-	"github.com/dockwhy/dockwhy/internal/docker"
+	"github.com/prabhnoor12/dockwhy/internal/diagnosis"
+	"github.com/prabhnoor12/dockwhy/internal/docker"
 )
 
 func TestJSONUsesStableLowercaseSchema(t *testing.T) {

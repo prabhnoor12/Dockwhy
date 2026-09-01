@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dockwhy/dockwhy/internal/docker"
+	"github.com/prabhnoor12/dockwhy/internal/docker"
 )
 
 type fakeClient struct {

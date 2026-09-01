@@ -7,7 +7,7 @@ builds:
     main: ./cmd/dockwhy
     binary: dockwhy
     ldflags:
-      - -s -w -X github.com/dockwhy/dockwhy/internal/version.Version={{ .Version }}
+      - -s -w -X github.com/prabhnoor12/dockwhy/internal/version.Version={{ .Version }}
     goos:
       - linux
       - darwin

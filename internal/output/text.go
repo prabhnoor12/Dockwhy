@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dockwhy/dockwhy/internal/diagnosis"
-	"github.com/dockwhy/dockwhy/internal/docker"
+	"github.com/prabhnoor12/dockwhy/internal/diagnosis"
+	"github.com/prabhnoor12/dockwhy/internal/docker"
 )
 
 func Text(w io.Writer, result diagnosis.Result) error {
