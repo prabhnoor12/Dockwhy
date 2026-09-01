@@ -27,6 +27,33 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
+      - LICENSE
+
+brews:
+  - name: dockwhy
+    repository:
+      owner: prabhnoor12
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/prabhnoor12/dockwhy"
+    description: "Explain why a Docker container stopped"
+    license: "Apache-2.0"
+    skip_upload: '{{ if eq .Env.HOMEBREW_TAP_TOKEN "" }}true{{ else }}false{{ end }}'
+    test: |
+      system "#{bin}/dockwhy", "--version"
+    install: |
+      bin.install "dockwhy"
+
+scoops:
+  - name: dockwhy
+    repository:
+      owner: prabhnoor12
+      name: scoop-bucket
+      token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
+    homepage: "https://github.com/prabhnoor12/dockwhy"
+    description: "Explain why a Docker container stopped"
+    license: "Apache-2.0"
+    skip_upload: '{{ if eq .Env.SCOOP_BUCKET_TOKEN "" }}true{{ else }}false{{ end }}'
 
 checksum:
   name_template: checksums.txt
