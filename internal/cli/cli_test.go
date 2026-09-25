@@ -1,3 +1,17 @@
+// Copyright 2026 Prabhnoor12
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package cli
 
 import (
@@ -286,10 +300,16 @@ func TestRunWatchMode(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var stdout, stderr strings.Builder
 	go func() {
-		time.Sleep(350 * time.Millisecond)
+		for i := 0; i < 50; i++ {
+			time.Sleep(50 * time.Millisecond)
+			if strings.Count(stdout.String(), "===") >= 2 {
+				cancel()
+				return
+			}
+		}
 		cancel()
 	}()
-	code := run(ctx, []string{"--watch", "100ms", "my-api"}, &stdout, &stderr, fakeClient{
+	code := run(ctx, []string{"--watch", "50ms", "my-api"}, &stdout, &stderr, fakeClient{
 		container: docker.Container{Name: "my-api", ID: "abc", Image: "api:latest", State: docker.State{Status: "exited", ExitCode: 1}},
 		logs:      "error starting",
 	}, nil)
@@ -300,8 +320,8 @@ func TestRunWatchMode(t *testing.T) {
 	if !strings.Contains(out, "===") {
 		t.Fatalf("expected watch separator in output: %s", out)
 	}
-	count := strings.Count(out, "my-api")
+	count := strings.Count(out, "===")
 	if count < 2 {
-		t.Fatalf("expected multiple diagnoses in watch mode, got %d occurrences", count)
+		t.Fatalf("expected at least 2 watch iterations, got %d", count)
 	}
 }

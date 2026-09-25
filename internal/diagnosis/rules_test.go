@@ -1,3 +1,17 @@
+// Copyright 2026 Prabhnoor12
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package diagnosis
 
 import (
@@ -31,6 +45,15 @@ func TestMatchesRuleContainerGlob(t *testing.T) {
 	}
 	if matchesRule(RuleMatch{ContainerGlob: "web-*"}, c, "") {
 		t.Error("should not match wrong prefix")
+	}
+	if !matchesRule(RuleMatch{ContainerGlob: "shop-api-?"}, c, "") {
+		t.Error("should match single-char wildcard")
+	}
+	if !matchesRule(RuleMatch{ContainerGlob: "[a-z]*"}, c, "") {
+		t.Error("should match character class")
+	}
+	if matchesRule(RuleMatch{ContainerGlob: "[0-9]*"}, c, "") {
+		t.Error("should not match wrong character class")
 	}
 }
 

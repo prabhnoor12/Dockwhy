@@ -1,9 +1,24 @@
+// Copyright 2026 Prabhnoor12
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package diagnosis
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"strings"
 
 	"github.com/prabhnoor12/dockwhy/internal/docker"
@@ -128,27 +143,11 @@ func matchesRule(match RuleMatch, c docker.Container, logs string) bool {
 }
 
 func globMatch(pattern, s string) bool {
-	if pattern == "*" {
-		return true
+	matched, err := path.Match(pattern, s)
+	if err != nil {
+		return false
 	}
-	if !strings.Contains(pattern, "*") {
-		return pattern == s
-	}
-	parts := strings.Split(pattern, "*")
-	if len(parts) == 2 {
-		return strings.HasPrefix(s, parts[0]) && strings.HasSuffix(s, parts[1]) && len(s) >= len(parts[0])+len(parts[1])
-	}
-	if strings.HasPrefix(pattern, "*") && strings.HasSuffix(pattern, "*") {
-		inner := pattern[1 : len(pattern)-1]
-		return strings.Contains(s, inner)
-	}
-	if strings.HasPrefix(pattern, "*") {
-		return strings.HasSuffix(s, pattern[1:])
-	}
-	if strings.HasSuffix(pattern, "*") {
-		return strings.HasPrefix(s, pattern[:len(pattern)-1])
-	}
-	return false
+	return matched
 }
 
 func ruleEvidence(rule Rule, c docker.Container) []Evidence {
