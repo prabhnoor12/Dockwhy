@@ -29,6 +29,7 @@ dockwhy --json my-api > diagnosis.json
 - [Custom Diagnosis Rules](#custom-diagnosis-rules)
 - [Docker Access and Security](#docker-access-and-security)
 - [Exit Codes](#exit-codes)
+- [IDE Extensions and Editor Integration](#ide-extensions-and-editor-integration)
 - [Development](#development)
 - [Releases](#releases)
 - [Contributing](#contributing)
@@ -429,6 +430,64 @@ If Docker reports a permission error:
 - `0`: diagnosis completed and output was written.
 - `1`: Docker could not be queried or output could not be written.
 - `2`: invalid command-line arguments or missing container argument.
+
+## IDE Extensions and Editor Integration
+
+Use dockwhy directly from your favorite editor:
+
+### VS Code
+Full-featured extension with sidebar, commands, and rich webview panels.
+
+```bash
+cd ide-extensions/vscode
+npm install
+npm run package
+code --install-extension dockwhy-0.1.0.vsix
+```
+
+Features: container tree view, one-click diagnosis, Docker Compose support, crash trends, resource recommendations, incident reports.
+
+### Neovim
+Lua plugin for modern Neovim (0.7+):
+
+```lua
+-- lazy.nvim
+{ "prabhnoor12/dockwhy", dir = "ide-extensions/neovim", config = function() require("dockwhy").setup() end }
+```
+
+Commands: `:Dockwhy`, `:DockwhyTrend`, `:DockwhyResources`, `:DockwhyReport`
+
+### Vim
+Vimscript plugin for Vim 8+:
+
+```vim
+" vim-plug
+Plug 'prabhnoor12/dockwhy', { 'rtp': 'ide-extensions/vim' }
+```
+
+### JetBrains IDEs
+External tools configuration for IntelliJ, WebStorm, PyCharm, GoLand, etc. See `ide-extensions/jetbrains/README.md` for setup instructions.
+
+### Shell Completions
+Tab completion for container names, flags, and output formats:
+
+**Bash**:
+```bash
+source completions/dockwhy.bash  # Add to ~/.bashrc
+```
+
+**Zsh**:
+```bash
+fpath=(completions $fpath)  # Add to ~/.zshrc
+autoload -U compinit && compinit
+```
+
+**Fish**:
+```bash
+cp completions/dockwhy.fish ~/.config/fish/completions/
+```
+
+See `ide-extensions/README.md` for detailed documentation.
 
 ## Development
 

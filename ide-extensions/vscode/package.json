@@ -1,0 +1,150 @@
+{
+  "name": "dockwhy",
+  "displayName": "Dockwhy - Docker Container Diagnostics",
+  "description": "Diagnose why Docker containers stopped directly from VS Code",
+  "version": "0.1.0",
+  "publisher": "prabhnoor12",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Debuggers",
+    "Other",
+    "Visualization"
+  ],
+  "keywords": [
+    "docker",
+    "container",
+    "diagnostics",
+    "debugging",
+    "kubernetes",
+    "devops"
+  ],
+  "activationEvents": [
+    "onCommand:dockwhy.diagnose",
+    "onCommand:dockwhy.diagnoseProject",
+    "onView:dockwhy.containers"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "dockwhy.diagnose",
+        "title": "Dockwhy: Diagnose Container",
+        "icon": "$(bug)"
+      },
+      {
+        "command": "dockwhy.diagnoseProject",
+        "title": "Dockwhy: Diagnose Docker Compose Project",
+        "icon": "$(project)"
+      },
+      {
+        "command": "dockwhy.diagnoseSelected",
+        "title": "Diagnose with Dockwhy",
+        "icon": "$(bug)"
+      },
+      {
+        "command": "dockwhy.refreshContainers",
+        "title": "Refresh Containers",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "dockwhy.showTrend",
+        "title": "Show Crash Trends",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "dockwhy.showResources",
+        "title": "Show Resource Recommendations",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "dockwhy.generateReport",
+        "title": "Generate Incident Report",
+        "icon": "$(file-text)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "dockwhy",
+          "title": "Dockwhy",
+          "icon": "$(bug)"
+        }
+      ]
+    },
+    "views": {
+      "dockwhy": [
+        {
+          "id": "dockwhy.containers",
+          "name": "Stopped Containers"
+        },
+        {
+          "id": "dockwhy.running",
+          "name": "Running Containers"
+        }
+      ]
+    },
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "dockwhy.diagnoseSelected",
+          "when": "view == dockwhy.containers || view == dockwhy.running",
+          "group": "inline"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Dockwhy",
+      "properties": {
+        "dockwhy.executablePath": {
+          "type": "string",
+          "default": "dockwhy",
+          "description": "Path to the dockwhy executable"
+        },
+        "dockwhy.defaultTail": {
+          "type": "number",
+          "default": 50,
+          "description": "Default number of log lines to show"
+        },
+        "dockwhy.defaultTimeout": {
+          "type": "string",
+          "default": "10s",
+          "description": "Default timeout for Docker commands"
+        },
+        "dockwhy.autoRefresh": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically refresh container list"
+        },
+        "dockwhy.refreshInterval": {
+          "type": "number",
+          "default": 30,
+          "description": "Auto-refresh interval in seconds"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.74.0",
+    "typescript": "^5.0.0",
+    "@vscode/vsce": "^2.22.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/prabhnoor12/dockwhy.git"
+  },
+  "bugs": {
+    "url": "https://github.com/prabhnoor12/dockwhy/issues"
+  },
+  "homepage": "https://github.com/prabhnoor12/dockwhy#readme",
+  "license": "Apache-2.0",
+  "icon": "resources/icon.png"
+}
