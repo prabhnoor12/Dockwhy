@@ -36,6 +36,7 @@ type Container struct {
 	Labels          map[string]string `json:"labels,omitempty"`
 }
 
+// Stats is a point-in-time resource usage snapshot from docker stats.
 type Stats struct {
 	CPUPercent       float64 `json:"cpu_percent"`
 	MemoryUsageBytes int64   `json:"memory_usage_bytes"`
@@ -48,6 +49,7 @@ type Stats struct {
 	PidsCurrent      int64   `json:"pids_current"`
 }
 
+// Mount describes a single mount point on a container.
 type Mount struct {
 	Type        string `json:"type"`
 	Name        string `json:"name,omitempty"`
@@ -58,6 +60,7 @@ type Mount struct {
 	Propagation string `json:"propagation,omitempty"`
 }
 
+// State is the runtime state of a container as reported by docker inspect.
 type State struct {
 	Status     string  `json:"status"`
 	Running    bool    `json:"running"`
@@ -71,12 +74,14 @@ type State struct {
 	Health     *Health `json:"health,omitempty"`
 }
 
+// Health is the health-check state of a container.
 type Health struct {
 	Status        string        `json:"status"`
 	FailingStreak int           `json:"failing_streak"`
 	Log           []HealthCheck `json:"log,omitempty"`
 }
 
+// HealthCheck is a single health-check execution record.
 type HealthCheck struct {
 	Start    string `json:"start"`
 	End      string `json:"end"`
@@ -84,11 +89,13 @@ type HealthCheck struct {
 	Output   string `json:"output"`
 }
 
+// LogOutput holds the text and truncation status of container logs.
 type LogOutput struct {
 	Text      string `json:"-"`
 	Truncated bool   `json:"-"`
 }
 
+// Event is a Docker lifecycle event for a container.
 type Event struct {
 	TimeNano int64             `json:"time_nano"`
 	Action   string            `json:"action"`
@@ -96,9 +103,20 @@ type Event struct {
 	Attrs    map[string]string `json:"attributes,omitempty"`
 }
 
+// ContainerSummary is a lightweight container reference returned by project listing.
+type ContainerSummary struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	ComposeService string `json:"compose_service,omitempty"`
+	Status         string `json:"status"`
+}
+
+// Client abstracts Docker CLI access so the diagnosis and output packages
+// can be tested without a running Docker daemon.
 type Client interface {
 	Inspect(name string) (Container, error)
 	Logs(name string, tail int) (LogOutput, error)
 	Events(containerID string, since time.Duration) ([]Event, error)
 	Stats(name string) (Stats, error)
+	ListByProject(project string) ([]ContainerSummary, error)
 }

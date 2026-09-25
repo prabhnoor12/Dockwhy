@@ -19,17 +19,18 @@ type CLIClient struct {
 	Timeout         time.Duration
 	MaxInspectBytes int
 	MaxLogBytes     int
+	ctx             context.Context
 	runOverride     func(maxBytes int, args ...string) (commandOutput, error)
 }
 
-func NewCLIClient() *CLIClient {
-	return &CLIClient{Binary: "docker", Timeout: 10 * time.Second, MaxInspectBytes: 16 << 20, MaxLogBytes: 2 << 20}
-}
-
-func (c *CLIClient) SetTimeout(timeout time.Duration) {
-	if timeout > 0 {
-		c.Timeout = timeout
+func NewCLIClient(ctx context.Context, timeout time.Duration) *CLIClient {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return &CLIClient{Binary: "docker", Timeout: timeout, MaxInspectBytes: 16 << 20, MaxLogBytes: 2 << 20, ctx: ctx}
 }
 
 func (c *CLIClient) Inspect(name string) (Container, error) {
@@ -103,6 +104,40 @@ func (c *CLIClient) Stats(name string) (Stats, error) {
 	return stats, nil
 }
 
+func (c *CLIClient) ListByProject(project string) ([]ContainerSummary, error) {
+	out, err := c.run(4<<20, "ps", "-a", "--filter", "label=com.docker.compose.project="+project, "--format", "{{json .}}")
+	if err != nil {
+		return nil, dockerCommandError("ps", project, out, err)
+	}
+	var summaries []ContainerSummary
+	for _, line := range strings.Split(strings.TrimSpace(out.stdout), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var raw struct {
+			ID     string `json:"ID"`
+			Names  string `json:"Names"`
+			Status string `json:"Status"`
+			Labels string `json:"Labels"`
+		}
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			return nil, fmt.Errorf("decode docker ps output: %w", err)
+		}
+		summary := ContainerSummary{
+			ID:     raw.ID,
+			Name:   raw.Names,
+			Status: raw.Status,
+		}
+		for _, label := range strings.Split(raw.Labels, ",") {
+			if strings.HasPrefix(label, "com.docker.compose.service=") {
+				summary.ComposeService = strings.TrimPrefix(label, "com.docker.compose.service=")
+			}
+		}
+		summaries = append(summaries, summary)
+	}
+	return summaries, nil
+}
+
 type commandOutput struct {
 	stdout    string
 	stderr    string
@@ -120,7 +155,7 @@ func (c *CLIClient) run(maxBytes int, args ...string) (commandOutput, error) {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(c.ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, c.Binary, args...)
 	var stdout, stderr limitedBuffer
@@ -136,7 +171,7 @@ func (c *CLIClient) run(maxBytes int, args ...string) (commandOutput, error) {
 
 func dockerCommandError(action, name string, output commandOutput, err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("docker %s %q timed out", action, name)
+		return fmt.Errorf("docker %s %q timed out: %w", action, name, err)
 	}
 	detail := strings.TrimSpace(output.stderr)
 	if detail == "" {
@@ -149,9 +184,9 @@ func dockerCommandError(action, name string, output commandOutput, err error) er
 		detail += " [docker output truncated]"
 	}
 	if errors.Is(err, exec.ErrNotFound) {
-		return fmt.Errorf("docker CLI is not installed or not on PATH")
+		return fmt.Errorf("docker CLI is not installed or not on PATH: %w", err)
 	}
-	return fmt.Errorf("docker %s %q failed: %s", action, name, detail)
+	return fmt.Errorf("docker %s %q failed: %s: %w", action, name, detail, err)
 }
 
 type inspectContainer struct {
@@ -339,6 +374,7 @@ func (r statsRecord) stats() (Stats, error) {
 
 func parsePercent(value string) (float64, error) {
 	value = strings.TrimSpace(strings.TrimSuffix(value, "%"))
+	value = strings.Replace(value, ",", ".", 1)
 	return strconv.ParseFloat(value, 64)
 }
 
@@ -373,6 +409,7 @@ func parseBytes(value string) (int64, error) {
 	for _, unit := range units {
 		if strings.HasSuffix(value, unit.suffix) {
 			number := strings.TrimSpace(strings.TrimSuffix(value, unit.suffix))
+			number = strings.Replace(number, ",", ".", 1)
 			parsed, err := strconv.ParseFloat(number, 64)
 			if err != nil {
 				return 0, err

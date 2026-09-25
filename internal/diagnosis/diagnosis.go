@@ -6,8 +6,11 @@ import (
 	"strings"
 
 	"github.com/prabhnoor12/dockwhy/internal/docker"
+	"github.com/prabhnoor12/dockwhy/internal/format"
 )
 
+// Result is the complete diagnosis for a container, combining the primary
+// explanation, ranked alternative findings, supporting evidence, and advice.
 type Result struct {
 	Container     docker.Container `json:"container"`
 	Findings      []Finding        `json:"findings"`
@@ -40,6 +43,7 @@ type Finding struct {
 	Advice     []string   `json:"advice,omitempty"`
 }
 
+// Evidence is a single named data point that supports a finding.
 type Evidence struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
@@ -230,15 +234,15 @@ func AnalyzeDetailed(c docker.Container, logs string, logsTruncated bool, events
 		r.Advice = append(r.Advice, fmt.Sprintf("The container has restarted %d time(s); inspect the restart loop's first failure, not just its latest state.", c.RestartCount))
 	}
 	if c.MemoryLimit > 0 {
-		add("memory limit", formatBytes(c.MemoryLimit))
+		add("memory limit", format.Bytes(c.MemoryLimit))
 	} else {
 		add("memory limit", "unlimited")
 	}
 	if c.MemoryReserved > 0 {
-		add("memory reservation", formatBytes(c.MemoryReserved))
+		add("memory reservation", format.Bytes(c.MemoryReserved))
 	}
 	if c.MemorySwapLimit > 0 {
-		add("memory+swap limit", formatBytes(c.MemorySwapLimit))
+		add("memory+swap limit", format.Bytes(c.MemorySwapLimit))
 	} else if c.MemoryLimit > 0 && c.MemorySwapLimit == -1 {
 		add("memory+swap limit", "unlimited")
 	}
@@ -248,10 +252,10 @@ func AnalyzeDetailed(c docker.Container, logs string, logsTruncated bool, events
 		add("disk limit", "not configured/reported")
 	}
 	if c.SizeRW > 0 {
-		add("writable layer", formatBytes(c.SizeRW))
+		add("writable layer", format.Bytes(c.SizeRW))
 	}
 	if c.SizeRootFS > 0 {
-		add("root filesystem", formatBytes(c.SizeRootFS))
+		add("root filesystem", format.Bytes(c.SizeRootFS))
 	}
 	if c.DiskReadOnly {
 		add("root filesystem", "read-only")
@@ -330,18 +334,4 @@ func formatCommand(command []string) string {
 		quoted = append(quoted, fmt.Sprintf("%q", part))
 	}
 	return strings.Join(quoted, " ")
-}
-
-func formatBytes(value int64) string {
-	units := []string{"B", "KiB", "MiB", "GiB", "TiB"}
-	n := float64(value)
-	i := 0
-	for n >= 1024 && i < len(units)-1 {
-		n /= 1024
-		i++
-	}
-	if i == 0 {
-		return fmt.Sprintf("%d %s", value, units[i])
-	}
-	return fmt.Sprintf("%.1f %s", n, units[i])
 }

@@ -75,3 +75,82 @@ func TestTextShowsChronologicalLifecycleTimeline(t *testing.T) {
 		t.Fatalf("event attributes were not shown: %s", text)
 	}
 }
+
+func TestDescribeEvent(t *testing.T) {
+	tests := []struct {
+		action string
+		want   string
+	}{
+		{"create", "created"},
+		{"start", "started"},
+		{"stop", "stopped"},
+		{"kill", "killed"},
+		{"die", "exited"},
+		{"restart", "restarted"},
+		{"destroy", "destroyed"},
+		{"health_status: unhealthy", "health check: unhealthy"},
+		{"health_status: healthy", "health check: healthy"},
+		{"unknown_action", "unknown_action"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.action, func(t *testing.T) {
+			if got := describeEvent(tt.action); got != tt.want {
+				t.Fatalf("describeEvent(%q) = %q, want %q", tt.action, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatEventTime(t *testing.T) {
+	t.Run("zero returns dash", func(t *testing.T) {
+		if got := formatEventTime(0); got != "-" {
+			t.Fatalf("formatEventTime(0) = %q, want %q", got, "-")
+		}
+	})
+	t.Run("negative returns dash", func(t *testing.T) {
+		if got := formatEventTime(-1); got != "-" {
+			t.Fatalf("formatEventTime(-1) = %q, want %q", got, "-")
+		}
+	})
+	t.Run("valid timestamp", func(t *testing.T) {
+		nano := time.Date(2026, 8, 29, 10, 0, 0, 0, time.UTC).UnixNano()
+		got := formatEventTime(nano)
+		if !strings.Contains(got, "2026-08-29") {
+			t.Fatalf("formatEventTime = %q, expected 2026-08-29", got)
+		}
+	})
+}
+
+func TestShortID(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"abcdef0123456789", "abcdef012345"},
+		{"short", "short"},
+		{"exactly12ch", "exactly12ch"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := shortID(tt.input); got != tt.want {
+				t.Fatalf("shortID(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatAttrs(t *testing.T) {
+	t.Run("empty map", func(t *testing.T) {
+		if got := formatAttrs(nil); got != "" {
+			t.Fatalf("formatAttrs(nil) = %q, want empty", got)
+		}
+	})
+	t.Run("sorts keys", func(t *testing.T) {
+		attrs := map[string]string{"exitCode": "1", "signal": "15"}
+		got := formatAttrs(attrs)
+		if got != "exitCode=1 signal=15" {
+			t.Fatalf("formatAttrs = %q", got)
+		}
+	})
+}

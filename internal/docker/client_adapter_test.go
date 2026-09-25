@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -10,7 +11,7 @@ import (
 var errFakeCommand = errors.New("fake command failed")
 
 func TestCLIClientAdapterParsesDockerCommands(t *testing.T) {
-	client := NewCLIClient()
+	client := NewCLIClient(context.Background(), 10*time.Second)
 	client.runOverride = func(_ int, args ...string) (commandOutput, error) {
 		switch args[0] {
 		case "inspect":
@@ -53,7 +54,7 @@ func TestCLIClientAdapterParsesDockerCommands(t *testing.T) {
 }
 
 func TestCLIClientAdapterReportsCommandErrors(t *testing.T) {
-	client := NewCLIClient()
+	client := NewCLIClient(context.Background(), 10*time.Second)
 	client.runOverride = func(_ int, args ...string) (commandOutput, error) {
 		return commandOutput{stderr: strings.Join(args, " ") + " failed"}, errFakeCommand
 	}

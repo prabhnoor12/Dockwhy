@@ -9,8 +9,10 @@ import (
 
 	"github.com/prabhnoor12/dockwhy/internal/diagnosis"
 	"github.com/prabhnoor12/dockwhy/internal/docker"
+	"github.com/prabhnoor12/dockwhy/internal/format"
 )
 
+// Text writes the diagnosis result as human-readable text to w.
 func Text(w io.Writer, result diagnosis.Result) error {
 	var b strings.Builder
 	c := result.Container
@@ -37,12 +39,12 @@ func Text(w io.Writer, result diagnosis.Result) error {
 			stats := result.Stats
 			fmt.Fprintf(&b, "  CPU:          %.2f%%\n", stats.CPUPercent)
 			if stats.MemoryLimitBytes > 0 {
-				fmt.Fprintf(&b, "  Memory:       %s / %s (%.2f%%)\n", formatStatBytes(stats.MemoryUsageBytes), formatStatBytes(stats.MemoryLimitBytes), stats.MemoryPercent)
+				fmt.Fprintf(&b, "  Memory:       %s / %s (%.2f%%)\n", format.Bytes(stats.MemoryUsageBytes), format.Bytes(stats.MemoryLimitBytes), stats.MemoryPercent)
 			} else {
-				fmt.Fprintf(&b, "  Memory:       %s (%.2f%%)\n", formatStatBytes(stats.MemoryUsageBytes), stats.MemoryPercent)
+				fmt.Fprintf(&b, "  Memory:       %s (%.2f%%)\n", format.Bytes(stats.MemoryUsageBytes), stats.MemoryPercent)
 			}
-			fmt.Fprintf(&b, "  Network I/O:  %s received / %s sent\n", formatStatBytes(stats.NetworkRxBytes), formatStatBytes(stats.NetworkTxBytes))
-			fmt.Fprintf(&b, "  Block I/O:    %s read / %s written\n", formatStatBytes(stats.BlockReadBytes), formatStatBytes(stats.BlockWriteBytes))
+			fmt.Fprintf(&b, "  Network I/O:  %s received / %s sent\n", format.Bytes(stats.NetworkRxBytes), format.Bytes(stats.NetworkTxBytes))
+			fmt.Fprintf(&b, "  Block I/O:    %s read / %s written\n", format.Bytes(stats.BlockReadBytes), format.Bytes(stats.BlockWriteBytes))
 			fmt.Fprintf(&b, "  Processes:    %d\n", stats.PidsCurrent)
 		}
 	}
@@ -50,6 +52,27 @@ func Text(w io.Writer, result diagnosis.Result) error {
 	fmt.Fprintln(&b, "\nDetails:")
 	for _, item := range result.Evidence {
 		fmt.Fprintf(&b, "  %-20s %s\n", item.Name+":", item.Value)
+	}
+
+	exitCode := c.State.ExitCode
+	if c.State.Status == "exited" || exitCode != 0 {
+		info := diagnosis.LookupExitCode(exitCode)
+		fmt.Fprintf(&b, "\nExit code %d (%s): %s\n", exitCode, info.Name, info.Description)
+		if info.Signal != "" {
+			fmt.Fprintf(&b, "  Signal: %s\n", info.Signal)
+		}
+		if len(info.Causes) > 0 {
+			fmt.Fprintln(&b, "  Common causes:")
+			for _, cause := range info.Causes {
+				fmt.Fprintf(&b, "    - %s\n", cause)
+			}
+		}
+		if len(info.Fixes) > 0 {
+			fmt.Fprintln(&b, "  Recommended fixes:")
+			for _, fix := range info.Fixes {
+				fmt.Fprintf(&b, "    - %s\n", fix)
+			}
+		}
 	}
 
 	if len(result.Advice) > 0 {
@@ -130,20 +153,6 @@ func describeEvent(action string) string {
 		return "health check: " + strings.TrimSpace(strings.TrimPrefix(action, "health_status:"))
 	}
 	return action
-}
-
-func formatStatBytes(value int64) string {
-	units := []string{"B", "KiB", "MiB", "GiB", "TiB"}
-	n := float64(value)
-	i := 0
-	for n >= 1024 && i < len(units)-1 {
-		n /= 1024
-		i++
-	}
-	if i == 0 {
-		return fmt.Sprintf("%d %s", value, units[i])
-	}
-	return fmt.Sprintf("%.1f %s", n, units[i])
 }
 
 func shortID(id string) string {
